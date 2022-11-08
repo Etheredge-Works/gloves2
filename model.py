@@ -3,6 +3,9 @@ import torchmetrics
 from torchvision.models import resnet18, ResNet18_Weights, convnext_tiny, resnet50
 from pytorch_lightning import LightningModule
 from icecream import ic
+from torch.nn import functional as F
+from torch import nn
+
 
 
 class SiameseNet(LightningModule):
@@ -17,42 +20,51 @@ class SiameseNet(LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters()
+        self.example_input_array = (torch.randn(1, 3, 224, 224), torch.randn(1, 3, 224, 224))
         if backbone == "resnet18":
             # self.backbone = resnet18(weights=None)
             self.backbone = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
-            self.backbone.fc = torch.nn.Sequential(
-                torch.nn.Linear(512, latent_size),
+            self.backbone.fc = nn.Sequential(
+                nn.Linear(512, latent_size),
             )
         elif backbone == "resnet50":
             self.backbone = resnet50(weights="IMAGENET1K_V2")
-            self.backbone.fc = torch.nn.Sequential(
-                torch.nn.Linear(2048, latent_size),
+            self.backbone.fc = nn.Sequential(
+                nn.Linear(2048, latent_size),
             )
         elif backbone == "convnext_tiny":
             self.backbone = convnext_tiny(weights="DEFAULT")
             # self.backbone = convnext_tiny(weights=None)
-            self.backbone.classifier = torch.nn.Sequential(
-                torch.nn.Flatten(), 
-                torch.nn.Linear(768, latent_size),
+            self.backbone.classifier = nn.Sequential(
+                nn.Flatten(), 
+                nn.Linear(768, latent_size),
             )
         else:
             raise ValueError("backbone not supported")
         print("backbone", self.backbone)
 
         if simple_head:
-            self.classifier = torch.nn.Sequential(
-                torch.nn.Linear(latent_size, 1),
-                # torch.nn.Sigmoid()
+            self.classifier = nn.Sequential(
+                # nn.Linear(latent_size, hidden_dim),
+                # nn.LeakyReLU(),
+                # nn.Linear(hidden_dim, hidden_dim),
+                # nn.LeakyReLU(),
+                # nn.Linear(hidden_dim, 1),
+
+                # torch.nn.Linear(latent_size, 1),
+
+                nn.Linear(1, 1), # might help rescale loss for sigmoid. does boost performance
+                # nn.Identity(),
             )
         else:
-            self.classifier = torch.nn.Sequential(
-                torch.nn.Linear(latent_size*2, hidden_dim),
+            self.classifier = nn.Sequential(
+                nn.Linear(latent_size*2, hidden_dim),
                 # torch.nn.LeakyReLU(),
                 # torch.nn.Dropout(dropout),
                 # torch.nn.Linear(hidden_dim, hidden_dim),
                 # torch.nn.LeakyReLU(),
                 # torch.nn.Dropout(dropout),
-                torch.nn.Linear(hidden_dim, 1)
+                nn.Linear(hidden_dim, 1)
             )
             
         # for param in self.backbone.parameters():
@@ -63,7 +75,8 @@ class SiameseNet(LightningModule):
         # self.dist = torch.nn.CosineSimilarity()
         # self.loss = torch.nn.CosineEmbeddingLoss()
         # self.loss = torch.nn.TripletMarginLoss()
-        self.loss = torch.nn.BCEWithLogitsLoss()
+        self.loss = nn.BCEWithLogitsLoss()
+        # self.loss = nn.BCELoss()
         self.train_acc = torchmetrics.Accuracy()
         self.val_acc = torchmetrics.Accuracy()
 
@@ -71,12 +84,18 @@ class SiameseNet(LightningModule):
         x1 = self.backbone(x1)
         x2 = self.backbone(x2)
         if self.hparams.simple_head:
-            x = torch.abs(x1 - x2)
+            # x = torch.abs(x1 - x2)
             # x = torch.sum(x, dim=1)
-            # x = F.cosine_similarity(x1, x2)
+            x = F.cosine_similarity(x1, x2)
+            x = x.view(-1, 1)
+            # ic(x.shape)
+            # x = (x+1 / 2)
+            # ic("min", torch.min(x))
+            # ic("max", torch.max(x))
+            # ic(x.shape)
         else:
             x = torch.cat([x1, x2], dim=1)
-            x = self.classifier(x)
+        x = self.classifier(x)
 
         x = x.view(-1)
         return x
@@ -113,7 +132,7 @@ class SiameseNet(LightningModule):
         # loss = self.loss(anchor, pos, neg)
         # loss = self.loss(anchor, pos, neg)
         loss = self.loss(x, label.float())
-        # loss = torch.nn.functional.binary_cross_entropy_with_logits(x, label)
+        # loss = nn.functional.binary_cross_entropy_with_logits(x, label)
         self.log("val/loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         self.log("val/acc", self.val_acc(torch.sigmoid(x), label), on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
 
