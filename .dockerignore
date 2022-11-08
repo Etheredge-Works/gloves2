@@ -1,0 +1,8 @@
+checkpoints/
+.devcontainer/
+.vscode/
+.vscode-test/
+__pycache__/
+*.ipynb
+wandb/
+data/
