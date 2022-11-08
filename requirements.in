@@ -1,0 +1,14 @@
+pip-tools
+
+torch 
+torchvision 
+torchaudio 
+--extra-index-url https://download.pytorch.org/whl/cu116
+
+
+pytorch-lightning
+lightning-bolts
+
+icecream
+wandb
+jupyterlab
